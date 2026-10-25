@@ -1,89 +1,120 @@
-import React, { useRef, useState } from 'react';
+import React, { useState, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { HiOutlineSave, HiOutlineX } from 'react-icons/hi';
-import { RiStickyNoteLine } from 'react-icons/ri';
-import { addNote } from '../utils/local-data';
+import { HiOutlineCheck, HiOutlineX } from 'react-icons/hi';
+import { addNote } from '../utils/network-data';
 import NoteActionButton from '../components/NoteActionButton';
+import LocaleContext from '../contexts/LocaleContext';
+import useToast from '../hooks/useToast';
+
+const MAX_TITLE_LENGTH = 50;
 
 function AddNotePage() {
+  const { content } = useContext(LocaleContext);
+  const toast = useToast();
   const navigate = useNavigate();
+
   const [title, setTitle] = useState('');
-  const bodyRef = useRef('');
+  const [body, setBody] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  function handleTitleChange(e) {
-    setTitle(e.target.value);
-  }
+  const handleTitleChange = (e) => {
+    const val = e.target.value;
+    if (val.length <= MAX_TITLE_LENGTH) setTitle(val);
+  };
 
-  function handleBodyInput(e) {
-    bodyRef.current = e.target.innerHTML;
-  }
-
-  function handleSave() {
+  const handleSave = async () => {
     if (!title.trim()) {
-      alert('Judul catatan tidak boleh kosong!');
+      toast.error(content.titleRequired);
       return;
     }
-    addNote({ title, body: bodyRef.current || '' });
-    navigate('/');
-  }
+    setIsSubmitting(true);
+    try {
+      const { error } = await addNote({ title: title.trim(), body: body.trim() });
+      if (!error) {
+        toast.success(content.saveSuccess);
+        navigate('/');
+      } else {
+        toast.error('Gagal menyimpan catatan.');
+      }
+    } catch (err) {
+      toast.error(err.message || 'Terjadi kesalahan.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
-  function handleCancel() {
-    navigate(-1);
-  }
+  const handleCancel = () => navigate(-1);
+
+  const charsLeft = MAX_TITLE_LENGTH - title.length;
+  const isNearLimit = charsLeft <= 10;
 
   return (
-    <main>
-      <div className="add-page__inner">
-        <div className="page-heading" style={{ marginBottom: '24px' }}>
-          <span className="page-heading__icon">
-            <RiStickyNoteLine />
-          </span>
-          <h2>Catatan Baru</h2>
+    <main className="main-content">
+      <div className="page-header-section">
+        <div className="page-heading">
+          <h2 className="page-heading__title">{content.newNoteTitle}</h2>
         </div>
+        <p className="page-subtitle">{content.newNoteSubtitle}</p>
+      </div>
 
-        <div className="add-new-page__input">
-          <label className="add-page__label" htmlFor="note-title">
-            Judul
-          </label>
+      <div className="editor-card">
+        {/* Title field */}
+        <div className="editor-field editor-field--title">
+          <div className="editor-field__meta-row">
+            <span className="editor-field__label">{content.noteTitleLabel}</span>
+            <span
+              className={`editor-field__counter ${
+                isNearLimit ? 'editor-field__counter--warn' : ''
+              }`}
+            >
+              {charsLeft}
+            </span>
+          </div>
           <input
-            id="note-title"
-            className="add-new-page__input__title"
+            className="editor-input editor-input--title"
             type="text"
-            placeholder="Judul catatan..."
+            placeholder={content.noteTitlePlaceholder}
             value={title}
             onChange={handleTitleChange}
-            maxLength={50}
+            disabled={isSubmitting}
+            maxLength={MAX_TITLE_LENGTH}
             autoFocus
           />
+        </div>
 
-          <label className="add-page__label" htmlFor="note-body">
-            Isi Catatan
-          </label>
-          <div
-            id="note-body"
-            className="add-new-page__input__body"
-            data-placeholder="Tulis isi catatan di sini... (mendukung bold, italic, dan format lainnya)"
-            contentEditable
-            suppressContentEditableWarning
-            onInput={handleBodyInput}
+        {/* Body field */}
+        <div className="editor-field editor-field--body">
+          <div className="editor-field__meta-row">
+            <span className="editor-field__label">{content.noteBodyLabel}</span>
+          </div>
+          <textarea
+            className="editor-input editor-input--body"
+            placeholder={content.noteBodyPlaceholder}
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+            disabled={isSubmitting}
+            rows={14}
           />
         </div>
       </div>
 
       <div className="page-actions">
         <NoteActionButton
-          title="Batal"
+          title={content.cancel}
           onClick={handleCancel}
-          className="action-btn--danger"
+          disabled={isSubmitting}
+          className="action-btn--secondary"
         >
           <HiOutlineX />
         </NoteActionButton>
+
         <NoteActionButton
-          title="Simpan Catatan"
+          title={isSubmitting ? content.saving : content.saveNote}
           onClick={handleSave}
+          disabled={isSubmitting || !title.trim()}
           className="action-btn--primary"
         >
-          <HiOutlineSave />
+          <HiOutlineCheck />
         </NoteActionButton>
       </div>
     </main>

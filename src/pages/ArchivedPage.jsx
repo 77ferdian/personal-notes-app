@@ -1,23 +1,43 @@
-import React, { useState, useEffect } from 'react';
-import { useSearchParams, useLocation } from 'react-router-dom';
+import React, { useState, useEffect, useContext } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { MdOutlineArchive } from 'react-icons/md';
-import { getArchivedNotes } from '../utils/local-data';
+import { getArchivedNotes } from '../utils/network-data';
 import SearchBar from '../components/SearchBar';
 import NoteList from '../components/NoteList';
+import LocaleContext from '../contexts/LocaleContext';
 
 function ArchivedPage() {
-  const location = useLocation();
-  const [notes, setNotes] = useState(getArchivedNotes());
+  const { content } = useContext(LocaleContext);
+
+  const [notes, setNotes] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const keyword = searchParams.get('keyword') || '';
 
   useEffect(() => {
-    setNotes(getArchivedNotes());
-  }, [location.key]);
+    let isMounted = true;
+
+    async function fetchArchivedNotes() {
+      setIsLoading(true);
+      const { error, data } = await getArchivedNotes();
+      if (isMounted) {
+        if (!error && data) {
+          setNotes(data);
+        }
+        setIsLoading(false);
+      }
+    }
+
+    fetchArchivedNotes();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   function handleKeywordChange(newKeyword) {
-    if (newKeyword) {
+    if (newKeyword.trim()) {
       setSearchParams({ keyword: newKeyword });
     } else {
       setSearchParams({});
@@ -30,33 +50,39 @@ function ArchivedPage() {
       )
     : notes;
 
-  const totalCount = notes.length;
+  const subtitleText = keyword
+    ? content.searchResults
+        .replace('{count}', filteredNotes.length)
+        .replace('{keyword}', keyword)
+    : content.archiveNotesCount.replace('{count}', notes.length);
+
+  const emptyMessage = keyword
+    ? content.emptySearchTitle
+    : content.emptyArchiveTitle;
+
+  const emptyHint = keyword
+    ? content.emptySearchHint.replace('{keyword}', keyword)
+    : content.emptyArchiveHint;
 
   return (
-    <main>
-      <div className="page-heading">
-        <span className="page-heading__icon">
-          <MdOutlineArchive />
-        </span>
-        <h2>Arsip Catatan</h2>
+    <main className="main-content">
+      <div className="page-header-section">
+        <div className="page-heading">
+          <span className="page-heading__icon">
+            <MdOutlineArchive />
+          </span>
+          <h2 className="page-heading__title">{content.archiveNotesTitle}</h2>
+        </div>
+        <p className="page-subtitle">{subtitleText}</p>
       </div>
-      <p className="page-subtitle">
-        {totalCount === 0
-          ? 'Belum ada catatan yang diarsipkan'
-          : `${totalCount} catatan diarsipkan`}
-        {keyword && ` · menampilkan ${filteredNotes.length} hasil untuk "${keyword}"`}
-      </p>
 
       <SearchBar keyword={keyword} onKeywordChange={handleKeywordChange} />
 
       <NoteList
         notes={filteredNotes}
-        emptyMessage={keyword ? 'Catatan tidak ditemukan.' : 'Arsip kosong.'}
-        emptyHint={
-          keyword
-            ? `Tidak ada catatan arsip dengan judul "${keyword}".`
-            : 'Arsipkan catatan dari halaman detail untuk menyimpannya di sini.'
-        }
+        emptyMessage={emptyMessage}
+        emptyHint={emptyHint}
+        isLoading={isLoading}
       />
     </main>
   );

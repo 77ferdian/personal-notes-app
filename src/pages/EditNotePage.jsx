@@ -1,99 +1,179 @@
-import React, { useRef, useState } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { HiOutlineSave, HiOutlineX } from 'react-icons/hi';
-import { RiEditLine } from 'react-icons/ri';
-import { getNote, editNote } from '../utils/local-data';
+import { HiOutlineCheck, HiOutlineX } from 'react-icons/hi';
+import { getNote, updateNote, deleteNote, addNote } from '../utils/network-data';
 import NoteActionButton from '../components/NoteActionButton';
-import NotFoundPage from './NotFoundPage';
+import LoadingIndicator from '../components/LoadingIndicator';
+import LocaleContext from '../contexts/LocaleContext';
+import useConfirm from '../hooks/useConfirm';
+import useToast from '../hooks/useToast';
+
+const MAX_TITLE_LENGTH = 50;
 
 function EditNotePage() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const { content } = useContext(LocaleContext);
+  const confirm = useConfirm();
+  const toast = useToast();
 
-  const note = getNote(id);
+  const [title, setTitle] = useState('');
+  const [body, setBody] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [originalNote, setOriginalNote] = useState(null);
 
-  const [title, setTitle] = useState(note ? note.title : '');
-  const bodyRef = useRef(note ? note.body : '');
+  useEffect(() => {
+    let isMounted = true;
 
-  if (!note) {
-    return <NotFoundPage />;
-  }
+    async function fetchNote() {
+      setIsLoading(true);
+      const { error, data } = await getNote(id);
+      if (isMounted) {
+        if (!error && data) {
+          setOriginalNote(data);
+          setTitle(data.title || '');
+          setBody(data.body || '');
+        } else {
+          navigate('/', { replace: true });
+        }
+        setIsLoading(false);
+      }
+    }
 
-  function handleTitleChange(e) {
-    setTitle(e.target.value);
-  }
+    fetchNote();
+    return () => { isMounted = false; };
+  }, [id, navigate]);
 
-  function handleBodyInput(e) {
-    bodyRef.current = e.target.innerHTML;
-  }
+  const handleTitleChange = (e) => {
+    const val = e.target.value;
+    if (val.length <= MAX_TITLE_LENGTH) setTitle(val);
+  };
 
-  function handleSave() {
+  const handleBodyChange = (e) => {
+    setBody(e.target.value);
+  };
+
+  const handleSave = async () => {
     if (!title.trim()) {
-      alert('Judul catatan tidak boleh kosong!');
+      toast.error(content.titleRequired);
       return;
     }
-    editNote({ id: note.id, title, body: bodyRef.current });
-    navigate(`/notes/${note.id}`);
-  }
 
-  function handleCancel() {
+    setIsSubmitting(true);
+
+    try {
+      const isArchived = Boolean(originalNote?.archived);
+      const { error, data, message } = await updateNote(id, {
+        title: title.trim(),
+        body: body.trim(),
+        archived: isArchived,
+      });
+
+      if (!error && data) {
+        toast.success(content.updateSuccess);
+        navigate(`/notes/${data.id}`, { replace: true });
+      } else {
+        toast.error(message || 'Gagal menyimpan perubahan.');
+      }
+    } catch (err) {
+      toast.error(err.message || 'Terjadi kesalahan.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDiscard = async () => {
+    const isDirty =
+      title.trim() !== (originalNote?.title || '').trim() ||
+      body.trim() !== (originalNote?.body || '').trim();
+
+    if (isDirty) {
+      const confirmed = await confirm(content.discardConfirm);
+      if (!confirmed) return;
+    }
     navigate(-1);
+  };
+
+  const charsLeft = MAX_TITLE_LENGTH - title.length;
+  const isNearLimit = charsLeft <= 10;
+
+  if (isLoading) {
+    return (
+      <main className="main-content">
+        <div className="editor-loading">
+          <LoadingIndicator text={content.loadingData} />
+        </div>
+      </main>
+    );
   }
 
   return (
-    <main>
-      <div className="add-page__inner">
-        <div className="page-heading" style={{ marginBottom: '24px' }}>
-          <span className="page-heading__icon">
-            <RiEditLine />
-          </span>
-          <h2>Edit Catatan</h2>
+    <main className="main-content">
+      {/* Page header */}
+      <div className="page-header-section">
+        <div className="page-heading">
+          <h2 className="page-heading__title">{content.editNoteTitle}</h2>
         </div>
+        <p className="page-subtitle">{content.editNoteSubtitle}</p>
+      </div>
 
-        <div className="add-new-page__input">
-          <label className="add-page__label" htmlFor="edit-title">
-            Judul
-          </label>
+      {/* Editor card */}
+      <div className="editor-card">
+        {/* Title field */}
+        <div className="editor-field editor-field--title">
+          <div className="editor-field__meta-row">
+            <span className="editor-field__label">{content.noteTitleLabel}</span>
+            <span className={`editor-field__counter ${isNearLimit ? 'editor-field__counter--warn' : ''}`}>
+              {charsLeft}
+            </span>
+          </div>
           <input
-            id="edit-title"
-            className="add-new-page__input__title"
+            className="editor-input editor-input--title"
             type="text"
-            placeholder="Judul catatan..."
+            placeholder={content.noteTitlePlaceholder}
             value={title}
             onChange={handleTitleChange}
-            maxLength={50}
+            disabled={isSubmitting}
+            maxLength={MAX_TITLE_LENGTH}
             autoFocus
           />
+        </div>
 
-          <label className="add-page__label" htmlFor="edit-body">
-            Isi Catatan
-          </label>
-          <div
-            id="edit-body"
-            className="add-new-page__input__body"
-            data-placeholder="Tulis isi catatan di sini..."
-            contentEditable
-            suppressContentEditableWarning
-            onInput={handleBodyInput}
-            dangerouslySetInnerHTML={{ __html: note.body }}
+        {/* Body field */}
+        <div className="editor-field editor-field--body">
+          <div className="editor-field__meta-row">
+            <span className="editor-field__label">{content.noteBodyLabel}</span>
+          </div>
+          <textarea
+            className="editor-input editor-input--body"
+            placeholder={content.noteBodyPlaceholder}
+            value={body}
+            onChange={handleBodyChange}
+            disabled={isSubmitting}
+            rows={16}
           />
         </div>
       </div>
 
+      {/* Action buttons */}
       <div className="page-actions">
         <NoteActionButton
-          title="Batal"
-          onClick={handleCancel}
-          className="action-btn--danger"
+          title={content.discardChanges}
+          onClick={handleDiscard}
+          disabled={isSubmitting}
+          className="action-btn--secondary"
         >
           <HiOutlineX />
         </NoteActionButton>
+
         <NoteActionButton
-          title="Simpan Perubahan"
+          title={isSubmitting ? content.updating : content.updateNote}
           onClick={handleSave}
+          disabled={isSubmitting || !title.trim()}
           className="action-btn--primary"
         >
-          <HiOutlineSave />
+          <HiOutlineCheck />
         </NoteActionButton>
       </div>
     </main>

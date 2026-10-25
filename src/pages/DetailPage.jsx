@@ -1,11 +1,10 @@
-import React, { useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import parser from 'html-react-parser';
+import React, { useState, useEffect, useContext } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   HiOutlineTrash,
   HiOutlineArrowLeft,
-  HiOutlineClock,
   HiOutlinePencil,
+  HiOutlineDocumentRemove,
 } from 'react-icons/hi';
 import { MdOutlineArchive, MdOutlineUnarchive } from 'react-icons/md';
 import {
@@ -13,109 +12,218 @@ import {
   deleteNote,
   archiveNote,
   unarchiveNote,
-} from '../utils/local-data';
+} from '../utils/network-data';
 import { showFormattedDate } from '../utils';
 import NoteActionButton from '../components/NoteActionButton';
-import NotFoundPage from './NotFoundPage';
+import LoadingIndicator from '../components/LoadingIndicator';
+import LocaleContext from '../contexts/LocaleContext';
+import useConfirm from '../hooks/useConfirm';
+import useToast from '../hooks/useToast';
 
 function DetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [note, setNote] = useState(() => getNote(id));
+  const { locale, content } = useContext(LocaleContext);
+  const confirm = useConfirm();
+  const toast = useToast();
 
-  if (!note) {
-    return <NotFoundPage />;
-  }
+  const [note, setNote] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  function handleDelete() {
-    deleteNote(note.id);
-    navigate('/');
-  }
+  useEffect(() => {
+    let isMounted = true;
 
-  function handleArchive() {
-    archiveNote(note.id);
-    setNote(getNote(note.id));
-  }
+    async function fetchNoteDetail() {
+      setIsLoading(true);
+      const { error, data } = await getNote(id);
+      if (isMounted) {
+        if (!error && data) {
+          setNote(data);
+        } else {
+          setNote(null);
+        }
+        setIsLoading(false);
+      }
+    }
 
-  function handleUnarchive() {
-    unarchiveNote(note.id);
-    setNote(getNote(note.id));
-  }
+    fetchNoteDetail();
 
-  function handleBack() {
-    navigate(-1);
-  }
+    return () => {
+      isMounted = false;
+    };
+  }, [id]);
 
-  function handleEdit() {
-    navigate(`/notes/${note.id}/edit`);
-  }
+  const handleDelete = async () => {
+    if (!note) return;
+    const isConfirmed = await confirm(content.deleteConfirm);
+    if (!isConfirmed) return;
 
-  return (
-    <main>
-      <div className="detail-page">
-        {note.archived && (
-          <div style={{ marginBottom: '20px' }}>
-            <span className="detail-page__archived-badge">
-              <MdOutlineArchive size={14} />
-              Catatan Diarsipkan
-            </span>
-          </div>
-        )}
+    setIsProcessing(true);
+    const { error } = await deleteNote(note.id);
+    setIsProcessing(false);
 
-        <h1 className="detail-page__title">{note.title}</h1>
+    if (!error) {
+      toast.success(content.deleteSuccess);
+      navigate('/');
+    }
+  };
 
-        <div className="detail-page__meta">
-          <HiOutlineClock size={14} />
-          <span className="detail-page__createdAt">
-            {showFormattedDate(note.createdAt)}
-          </span>
+  const handleArchive = async () => {
+    if (!note) return;
+    setIsProcessing(true);
+    const { error } = await archiveNote(note.id);
+    setIsProcessing(false);
+    if (!error) {
+      setNote((prev) => ({ ...prev, archived: true }));
+      toast.success(content.archiveSuccess);
+    }
+  };
+
+  const handleUnarchive = async () => {
+    if (!note) return;
+    setIsProcessing(true);
+    const { error } = await unarchiveNote(note.id);
+    setIsProcessing(false);
+    if (!error) {
+      setNote((prev) => ({ ...prev, archived: false }));
+      toast.success(content.unarchiveSuccess);
+    }
+  };
+
+  const handleBack = () => navigate(-1);
+  const handleEdit = () => navigate(`/notes/${note.id}/edit`);
+
+  /* ── Loading ── */
+  if (isLoading) {
+    return (
+      <main className="main-content">
+        <div className="detail-loading-wrapper">
+          <LoadingIndicator text={content.loadingData} />
         </div>
+      </main>
+    );
+  }
 
-        <div className="detail-page__body">{parser(note.body)}</div>
-      </div>
+  /* ── Not found ── */
+  if (!note) {
+    return (
+      <main className="main-content">
+        <div className="detail-not-found">
+          <div className="notes-list-empty__icon-box">
+            <HiOutlineDocumentRemove className="notes-list-empty__icon" />
+          </div>
+          <h2 className="notes-list-empty__title">{content.noteNotFoundTitle}</h2>
+          <p className="notes-list-empty__hint">{content.noteNotFoundSubtitle}</p>
+          <div style={{ marginTop: '20px' }}>
+            <Link to="/" className="detail-back-link">
+              <HiOutlineArrowLeft size={16} />
+              {content.backToNotes}
+            </Link>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
-      <div className="page-actions">
-        <NoteActionButton
-          title="Kembali"
-          onClick={handleBack}
-          className="action-btn--secondary"
-        >
-          <HiOutlineArrowLeft />
-        </NoteActionButton>
+  /* ── Detail view ── */
+  return (
+    <main className="main-content">
+      {/* Breadcrumb / back */}
+      <button type="button" className="detail-back-btn" onClick={handleBack}>
+        <HiOutlineArrowLeft size={15} />
+        <span>{content.back}</span>
+      </button>
 
-        <NoteActionButton
-          title="Edit Catatan"
-          onClick={handleEdit}
-          className="action-btn--warning"
-        >
-          <HiOutlinePencil />
-        </NoteActionButton>
+      <div className="detail-page">
+        <div className="detail-page__card">
+          {/* Header section */}
+          <div className="detail-page__header">
+            <div className="detail-page__top-row">
+              <span
+                className={`detail-page__badge ${
+                  note.archived
+                    ? 'detail-page__badge--archived'
+                    : 'detail-page__badge--active'
+                }`}
+              >
+                {note.archived ? content.archivedBadge : content.activeBadge}
+              </span>
 
-        {note.archived ? (
-          <NoteActionButton
-            title="Batal Arsip"
-            onClick={handleUnarchive}
-            className="action-btn--success"
-          >
-            <MdOutlineUnarchive />
-          </NoteActionButton>
-        ) : (
-          <NoteActionButton
-            title="Arsipkan Catatan"
-            onClick={handleArchive}
-            className="action-btn--secondary"
-          >
-            <MdOutlineArchive />
-          </NoteActionButton>
-        )}
+              {/* Action buttons inline with header */}
+              <div className="detail-page__header-actions">
+                {!note.archived && (
+                  <button
+                    type="button"
+                    className="detail-action-btn"
+                    onClick={handleEdit}
+                    disabled={isProcessing}
+                    title={content.editAction}
+                  >
+                    <HiOutlinePencil size={15} />
+                    <span>{content.editAction}</span>
+                  </button>
+                )}
 
-        <NoteActionButton
-          title="Hapus Catatan"
-          onClick={handleDelete}
-          className="action-btn--danger"
-        >
-          <HiOutlineTrash />
-        </NoteActionButton>
+                {note.archived ? (
+                  <button
+                    type="button"
+                    className="detail-action-btn"
+                    onClick={handleUnarchive}
+                    disabled={isProcessing}
+                    title={content.unarchiveAction}
+                  >
+                    <MdOutlineUnarchive size={15} />
+                    <span>{content.unarchiveAction}</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="detail-action-btn"
+                    onClick={handleArchive}
+                    disabled={isProcessing}
+                    title={content.archiveAction}
+                  >
+                    <MdOutlineArchive size={15} />
+                    <span>{content.archiveAction}</span>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  className="detail-action-btn detail-action-btn--danger"
+                  onClick={handleDelete}
+                  disabled={isProcessing}
+                  title={content.deleteAction}
+                >
+                  <HiOutlineTrash size={15} />
+                  <span>{content.deleteAction}</span>
+                </button>
+              </div>
+            </div>
+
+            <h1 className="detail-page__title">{note.title}</h1>
+
+            <time dateTime={note.createdAt} className="detail-page__meta">
+              {showFormattedDate(note.createdAt, locale)}
+            </time>
+          </div>
+
+          {/* Body section */}
+          <div className="detail-page__body">
+            {note.body && note.body.trim() !== '' ? (
+              <p style={{ whiteSpace: 'pre-wrap' }}>{note.body}</p>
+            ) : (
+              <p className="detail-page__empty-body">
+                <em>
+                  {locale === 'id'
+                    ? 'Catatan ini tidak memiliki isi.'
+                    : 'This note has no content.'}
+                </em>
+              </p>
+            )}
+          </div>
+        </div>
       </div>
     </main>
   );
